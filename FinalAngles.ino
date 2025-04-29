@@ -10,15 +10,11 @@
 #define BNO08X_INT 9
 // #define FAST_MODE
 #define BNO08X_RESET -1
-#define FREQUENCY_HZ        1000000
-#define INTERVAL_MS         (1000 / (FREQUENCY_HZ + 1))
 
-#define PIN_12  12  // ADC2 Channel 5
-#define PIN_14  14  // ADC2 Channel 6
-#define PIN_32  32  // ADC1 Channel 4
-#define PIN_35  35  // ADC1 Channel 7
-
-static unsigned long last_interval_ms = 0;
+#define PIN_14  33  // ADC2 Channel 5
+#define PIN_27  32  // ADC2 Channel 6
+#define PIN_32  35  // ADC1 Channel 4
+#define PIN_33  34  // ADC1 Channel 7
 
 // to classify 1 frame of data you need EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE values
 float features[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE];
@@ -29,9 +25,22 @@ float OffRoll = 0.0;
 float OffPitch = 0.0;
 float OffYaw = 0.0;
 
+float RapidYaw = 0;
+float RapidPitch = 0;
+float RapidRoll = 0;
+
 int wavec = 0;
 int tsuc = 0;
 int comsic = 0;
+
+int CalibC = 0;
+int staC = 0;
+
+int raw14 = 0;
+int raw27 = 0;
+int raw32 = 0;
+int raw33 = 0;
+
 
 uint8_t broadcastAddress[] = {0x3C, 0x8A, 0x1F, 0xAF, 0x5C, 0x44}; //3C:8A:1F:AF:5C:44
 
@@ -82,6 +91,11 @@ void setup(void) {
   Wire.begin();
   Wire.setClock(1000000); // Set I2C clock to 400kHz
   WiFi.mode(WIFI_STA); //--> Set device as a Wi-Fi Station.
+
+  pinMode(PIN_14, INPUT);
+  pinMode(PIN_27, INPUT);
+  pinMode(PIN_33, INPUT);
+  pinMode(PIN_32, INPUT);
 
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
@@ -156,24 +170,27 @@ void quaternionToEulerGI(sh2_GyroIntegratedRV_t* rotational_vector, euler_t* ypr
 
 void loop() {
 
+  unsigned long startTime = millis();
+
   float yaw, pitch, roll;
 
-  int raw12 = analogRead(PIN_12);
-  int raw14 = analogRead(PIN_14);
-  int raw32 = analogRead(PIN_32);
-  int raw35 = analogRead(PIN_35);
+raw14 = analogRead(PIN_14);
+raw27 = analogRead(PIN_27);
+raw32 = analogRead(PIN_32);
+raw33 = analogRead(PIN_33);
 
-// ESP32 ADC is 12-bit (0-4095), assuming 3.3V reference
-  float voltage12 = raw12 * (3.3 / 4095.0);
-  float voltage14 = raw14 * (3.3 / 4095.0);
-  float voltage32 = raw32 * (3.3 / 4095.0);
-  float voltage35 = raw35 * (3.3 / 4095.0);
 
-  send_Data.value = send_value;
-  //----------------------------------------Send message via ESP-NOW
-  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &send_Data, sizeof(send_Data));
+//  Serial.print(" 1");   Serial.print(raw14);   Serial.print(" 2");   Serial.print(raw27);   Serial.print(" 3");   Serial.print(raw32);   Serial.print(" 4");   Serial.println(raw33);
 
-  if(raw32 > 2 && raw35 > 2){
+  if(CalibC > 0){
+    CalibC++;
+  }
+  if(CalibC > 250){
+    CalibC = 0;
+  }
+
+
+  if(raw32 > 2 && raw33 > 2 && raw14 > 2 && raw27 > 2){
     Serial.println("Stop");
     send_value = 0; //Forward
     send_Data.value = send_value;
@@ -187,8 +204,6 @@ void loop() {
     Serial.print("sensor was reset ");
     setReports(reportType, reportIntervalUs);
   }
-//f (millis() > last_interval_ms + INTERVAL_MS) {
-        //last_interval_ms = millis();
 
   if (bno08x.getSensorEvent(&sensorValue)) {
     // in this demo only one report type will be received depending on FAST_MODE define (above)
@@ -200,9 +215,6 @@ void loop() {
         quaternionToEulerGI(&sensorValue.un.gyroIntegratedRV, &ypr, true);
         break;
     }
-    static long last = 0;
-    long now = micros();
-    last = now;
 
     pitch = ypr.pitch - OffPitch;
     roll = ypr.roll - OffRoll;
@@ -239,15 +251,19 @@ void loop() {
     // reset features frame
     feature_ix = 0;
 
-//      Serial.print(ypr.yaw - OffYaw);                Serial.print(",");
-//      Serial.print(ypr.pitch - OffPitch);              Serial.print(",");
-//      Serial.println(ypr.roll - OffRoll);
-//      Serial.println(wavec);
-//      Serial.println(tsuc);
+//    Serial.print("Yaw:");
+//    Serial.print(yaw);
+//    Serial.print(",");
+//    Serial.print("Pitch:");                    
+//    Serial.print(pitch);
+//    Serial.print(",");
+//    Serial.print("Roll:");                  
+//    Serial.println(roll);             
 
       if(result.classification[0].value > 0.75){
         comsic++;
         if(tsuc < 3 && wavec < 3 && comsic < 2){
+                    send_value = 5; //Stationary
           return;}   
       }  else{
         comsic = 0;
@@ -256,6 +272,7 @@ void loop() {
       if(result.classification[2].value > 0.70){
         wavec++;
         if(wavec < 3 && tsuc < 3 && comsic < 2){
+                    send_value = 5; //Stationary
           return;}     
       } else{
         wavec = 0;
@@ -263,6 +280,7 @@ void loop() {
       if(result.classification[1].value > 0.75){
         tsuc++;
         if(tsuc < 3 && wavec < 3 && comsic < 2){
+                    send_value = 5; //Stationary
           return;}   
       }  else{
         tsuc = 0;
@@ -272,42 +290,119 @@ void loop() {
       if(tsuc < 3 && wavec < 3 && comsic < 2){
         if(ypr.pitch - OffPitch < -15){
           Serial.println("left");    
-          send_value = 4; //Left
+          send_value = 40; //Left
+          Speed();
         } else if (ypr.pitch - OffPitch > 15){
-          Serial.println("rigth");    
-          send_value = 3; //Right
+          Serial.println("right");    
+          send_value = 30; //Right
+          Speed();
         } else if (ypr.roll - OffRoll > 15){
+           if(raw32 > 2 && raw33 > 2 && 2 && raw27 > 2){
+            Serial.println("indicate right");
+            send_value = 90;
+            return;
+           }          
           Serial.println("forward");     
-          send_value = 1; //Forward
+          send_value = 10; //Forward
+          Speed();
         }  else if (ypr.roll - OffRoll < -15){
+           if(raw32 > 2 && raw33 > 2 && 2 && raw27 > 2){
+            Serial.println("indicate left");
+            send_value = 100;
+            return;
+           }
           Serial.println("reverse");
-          send_value = 2; //Reverse
+          send_value = 20; //Reverse
+          Speed();
         }else{
           Serial.println("stationary"); 
-          send_value = 5; //Stationary
+          send_value = 50; //Stationary
+          staC++;
+
+          if(staC > 25 && CalibC == 0){
+            rapidcom();
+            CalibC = 1;
+            staC = 0;
+          }
         }
       }
 
       if(tsuc > 2){
-        Serial.println("Tsunami");
-         send_value = 6; //Forward
+        Serial.print("Tsunami");
+         send_value = 70; //Forward
         delay(50);
       }
 
       if(wavec > 2){
-        Serial.println("wave");
-         send_value = 7; //Forward
+        Serial.print("wave");
+         send_value = 60; //Forward
         delay(50);
       }
 
       if(comsic > 1){
-        Serial.println("comsi");
-         send_value = 8; //Forward
+        Serial.print("comsi");
+         send_value = 80; //Forward
         delay(50);
       }
+    //Serial.print(",");
+    //Serial.print(send_value);
+
+      unsigned long endTime = millis();
+      unsigned long duration = endTime - startTime;
+
+      //Serial.print("Loop execution time: ");
+     // Serial.print(duration);
+      //Serial.println(" ms");
 
     }
+
+      send_Data.value = send_value;
+    //----------------------------------------Send message via ESP-NOW
+      esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &send_Data, sizeof(send_Data));
+
   }
+
+}
+void rapidcom() {
+
+  if (bno08x.wasReset()) {
+    Serial.print("Sensor was reset ");
+    setReports(reportType, reportIntervalUs);
+  }
+  
+  if(ypr.yaw - OffYaw == 0 && ypr.pitch - OffPitch == 0 && ypr.roll - OffRoll == 0 ){
+    return;
+  }
+
+  for (int i = 0; i < 5; i++) {
+
+    if (bno08x.getSensorEvent(&sensorValue)) {
+      switch (sensorValue.sensorId) {
+        case SH2_ARVR_STABILIZED_RV:
+          quaternionToEulerRV(&sensorValue.un.arvrStabilizedRV, &ypr, true);
+          break;
+        case SH2_GYRO_INTEGRATED_RV:
+          quaternionToEulerGI(&sensorValue.un.gyroIntegratedRV, &ypr, true);
+          break;
+      }
+
+      // Collect offsets properly
+      RapidYaw += ypr.yaw - OffYaw;
+      RapidPitch += ypr.pitch - OffPitch;
+      RapidRoll += ypr.roll - OffRoll;
+    }
+    delay(5); // Wait for new data
+  }
+  RapidYaw /= 5;
+  RapidPitch /= 5;
+  RapidRoll /= 5;
+  // Compute the average
+
+  OffYaw = OffYaw + RapidYaw;
+  OffPitch = OffPitch + RapidPitch;
+  OffRoll = OffRoll + RapidRoll;
+
+  Serial.print("active");
 }
 
 void FilterCom() {
@@ -368,4 +463,33 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
     success = "Delivery Fail :(";
   }
   //Serial.println(">>>>>");
+}
+
+void Speed() {
+// Handle speed calculation using a switch
+int speed;
+
+  switch (send_value) {
+    case 40: // Left
+      speed = (abs(ypr.pitch - OffPitch) - 15) / 6;
+      break;
+
+    case 30: // Right
+      speed = (abs(ypr.pitch - OffPitch) - 15) / 6;
+      break;
+
+    case 10: // Forward
+      speed = (abs(ypr.roll - OffRoll) - 15) / 6;
+      break;
+
+    case 20: // Reverse
+      speed = (abs(ypr.roll - OffRoll) - 15) / 6;
+      break;
+  }
+
+  // Cap speed to 9 if over 64degreea
+  if (speed > 9) {
+    speed = 9;
+  }
+  send_value = send_value + speed;
 }
