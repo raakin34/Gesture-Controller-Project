@@ -1,4 +1,4 @@
-#🤖 Hand Gesture Controlled RC Car
+# 🤖 Hand Gesture Controlled RC Car
 
 This project implements a hand-based gesture controller for a remote-control car using neural networks and calibration techniques to achieve low latency and high accuracy. It enables users to control the car’s movements through intuitive hand gestures, replacing traditional input methods and creating a more engaging and accessible experience.
 
@@ -14,7 +14,7 @@ The repository covers:
 
 This solution demonstrates how gesture recognition can be applied to real-world control systems, offering an interactive and futuristic way to operate devices.
 
-##🛠 Tools Used
+## 🛠 Tools Used
 
 Python – Programming language for data processing, model training, and integration
 
