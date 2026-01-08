@@ -33,3 +33,7 @@ Serial Communication – Interface between the gesture controller and the car
 Fusion 360 (Fusion CAD) – 3D design and modeling for custom RC car parts
 
 Matplotlib / Seaborn – Visualization of gesture data for analysis and debugging
+
+### 🙏 Acknowledgements
+
+Special thanks to Luk Arnaut for guidance and support throughout this project.
